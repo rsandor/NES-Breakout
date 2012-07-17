@@ -37,7 +37,7 @@ load_palette:
 set_attributes:
 	ldx #$40
 	vram #$23, #$c0
-	lda #%01010101
+	lda #0
 @loop:	sta $2007
 	dex
 	bne @loop
@@ -95,8 +95,8 @@ game_loop:
 
 palette:
 	; Background
-	.byte $0f, $03, $00, $00
-	.byte $0f, $19, $00, $00
+	.byte $0f, $03, $19, $00
+	.byte $0f, $00, $00, $00
 	.byte $0f, $00, $00, $00
 	.byte $0f, $00, $00, $00
 
