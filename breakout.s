@@ -23,6 +23,13 @@ reset:
 
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main:
+	counter = $0300
+	lda #$00
+	sta counter
+
+	paddle_state = $0301
+	lda #$00
+	sta paddle_state
 
 
 load_palette:
@@ -43,7 +50,6 @@ set_attributes:
 	bne @loop
 
 draw_logo:
-	
 	lo = $20
 	hi = $21
 
@@ -80,12 +86,67 @@ enable_rendering:
 	sta $2006
 	sta $2006
 
+clear_sprites:
+	lda #$fe
+	ldx #$00
+@clear:	sta $0200, x
+	inx
+	bne @clear
+
+load_sprites:
+	; Draw the paddle
+	ldx #$00
+@loop:	lda paddle, x
+	sta $0200, x
+	inx
+	cpx #$10
+	bne @loop
+
+
+
 forever:
 	jmp forever
 
 
 ;;;;;;;;;;;;;; Game Loop (NMI) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 game_loop:
+
+draw_sprites:
+	lda #$00
+	sta $2003
+	lda #$02
+	sta $4014
+
+check_counter:
+	inc counter
+	ldx counter
+	cpx #$08
+	beq cycle_palette
+	jmp cleanup
+	
+cycle_palette:
+	ldx #$00
+	stx counter
+
+	inc paddle_state
+	lda paddle_state
+	and #$03
+	sta paddle_state
+	tax
+	vram #$3f, #$12
+	lda paddle_cycle, x
+	sta $2007
+
+	vram #$3f, #$01
+	lda bg_cycle, x
+	sta $2007
+
+
+
+
+
+cleanup:
+	vram #$00, #$00
 	rti
 
 ;;;;;;;;;;;;;; Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -101,16 +162,30 @@ palette:
 	.byte $0f, $00, $00, $00
 
 	; Sprites
+	.byte $0f, $00, $08, $10
 	.byte $0f, $00, $00, $00
 	.byte $0f, $00, $00, $00
 	.byte $0f, $00, $00, $00
-	.byte $0f, $00, $00, $00
+
+paddle:
+	.byte $08, $40, %00000000, $10
+	.byte $08, $41, %00000000, $18
+	.byte $08, $41, %01000000, $20
+	.byte $08, $40, %01000000, $28
+
+paddle_cycle:
+	.byte $08, $18, $28, $38
+
+
+bg_cycle:
+	.byte $03, $13, $23, $33
 
 
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .segment "CHARS"
 .include "include/logo.s"
+.include "include/paddle.s"
 
 ;;;;;;;;;;;;;; Vectors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
