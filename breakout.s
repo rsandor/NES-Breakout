@@ -42,54 +42,55 @@ reset:
 	jsr get_tile
 .endmacro
 
+;;;;;;;;;;;;;; Global Variables ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+; Pallet cycle timer and delay
+palette_timer = $0300
+palette_delay = $0b
+
+; Paddle's palette state
+paddle_state = $0301
+
+; Master game states
+game_state = $0302
+
+.enum State
+	TITLE
+	NEW
+	PLAYING
+	PAUSED
+	GAMEOVER
+.endenum
+
+; Ball position
+ball_x = $0203
+ball_y = $0200
+
+; Ball direction
+ball_dx = $0303
+ball_dy = $0304
+
+; Whether or not the ball is moving
+ball_moving = $0305
+
+; Flag that determines if start was held last frame
+start_down = $0306
+
+; Whether or not the game is paused
+game_paused = $0307
+
+; Paddle position
+paddle_x = $0207
+
+
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main:
-	; Palette Cycle Timer
-	palette_timer = $0300
-	palette_delay = $0b
-	lda #$00
-	sta palette_timer
-
-	; Paddle's Palette State
-	paddle_state = $0301
-	lda #$00
-	sta paddle_state
-
-	; Game state
-	game_state = $0302
-
-	; Ball position
-	ball_x = $0203
-	ball_y = $0200
-
-	; Ball direction
-	ball_dx = $0303
-	ball_dy = $0304
-
-	; Whether or not the ball is moving
-	ball_moving = $0305
-
-	; Flag that determines if start was held last frame
-	start_down = $0306
-
-	; Whether or not the game is paused
-	game_paused = $0307
-
-	; Paddle position
-	paddle_x = $0207
-
-	; Game states
-	STATE_TITLE = 0
-	STATE_NEW = 1
-	STATE_PLAYING = 2
-	STATE_PAUSED = 3
-	STATE_GAMEOVER = 4
-	
 	; Load the default palette
 	jsr load_palette
 
 	; Set the game state to the title screen
-	lda #STATE_TITLE
+	lda #State::TITLE
 	sta $00
 	jsr change_state
 
@@ -108,12 +109,12 @@ game_loop:
 	jsr title_loop
 	jmp cleanup
 
-@play:	cmp #STATE_PLAYING
+@play:	cmp #State::PLAYING
 	bne @pause
 	jsr play_loop
 	jmp cleanup
 
-@pause:	cmp #STATE_PAUSED
+@pause:	cmp #State::PAUSED
 	bne @over
 	jsr pause_loop
 	jmp cleanup
@@ -152,7 +153,7 @@ title_loop:
 	sta start_down
 
 	; Change to the new game state if they pressed start
-	lda #STATE_NEW
+	lda #State::NEW
 	sta $00
 	jsr change_state
 
@@ -194,7 +195,7 @@ button_start:
 	lda #1
 	sta start_down
 
-	lda #STATE_PAUSED
+	lda #State::PAUSED
 	sta $00
 	jsr change_state
 	rts
@@ -416,7 +417,7 @@ pause_loop:
 	beq @done
 
 	sta start_down
-	lda #STATE_PLAYING
+	lda #State::PLAYING
 	sta $00
 	jsr change_state
 	rts
@@ -440,7 +441,7 @@ change_state:
 	sta game_state
 
 @title: 
-	cmp #STATE_TITLE
+	cmp #State::TITLE
 	bne @new_game
 
 	; Disable NMI, sprites, and background
@@ -463,7 +464,7 @@ change_state:
 	jmp @return
 
 @new_game:
-	cmp #STATE_NEW
+	cmp #State::NEW
 	bne @playing
 
 	; Disable NMI, sprites, and background
@@ -475,8 +476,12 @@ change_state:
 	jsr clear_sprites
 	jsr load_sprites
 
-	; Reset the ball dx, dy
+	; Reset the palette timer and paddle palette state
 	lda #$00
+	sta palette_timer
+	sta paddle_state
+
+	; Reset the ball dx, dy
 	sta ball_dx
 	sta ball_dy
 
@@ -485,7 +490,7 @@ change_state:
 	sta game_paused
 
 	; Set the game state to "playing"
-	lda #STATE_PLAYING
+	lda #State::PLAYING
 	sta game_state
 	
 	; Draw the game board
@@ -502,7 +507,7 @@ change_state:
 	jmp @return
 
 @playing:
-	cmp #STATE_PLAYING
+	cmp #State::PLAYING
 	bne @paused
 
 	; Swtich to color mode
@@ -512,7 +517,7 @@ change_state:
 	jmp @return
 
 @paused:
-	cmp #STATE_PAUSED
+	cmp #State::PAUSED
 	bne @game_over
 
 	; Switch to monochrome mode
