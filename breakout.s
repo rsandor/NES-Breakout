@@ -59,6 +59,7 @@ game_state = $0302
 	TITLE
 	NEW
 	PLAYING
+	LOSE_LIFE
 	PAUSED
 	GAMEOVER
 .endenum
@@ -83,6 +84,14 @@ game_paused = $0307
 ; Paddle position
 paddle_x = $0207
 
+; Number of hits required to destroy a block
+; Can be: #$44, #$46, #$48, #$4A
+; Used in conjunction with the 'block_hit' routine
+;
+; TODO Not working yet, fixme!
+;
+block_destroyed = $0208
+
 
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main:
@@ -93,6 +102,9 @@ main:
 	lda #State::TITLE
 	sta $00
 	jsr change_state
+
+	lda #$44
+	sta block_destroyed
 
 	; Reset VRAM address
 	vram #0, #0
@@ -299,9 +311,6 @@ check_palette_timer:
 @done:
 
 
-bound_ball:
-	
-
 check_hit:
 	bit $2002
 	bvs check_x
@@ -356,24 +365,33 @@ check_down:
 check_paddle:
 	lda ball_y
 	cmp #$c0
-	bne move_ball
+	bne check_lose
 
 	; ball_x >= paddle_x
 	lda ball_x
 	cmp paddle_x
-	bcc move_ball
+	bcc check_lose
 
 	; paddle_x + 33 >= ball_x
 	clc
 	lda paddle_x
 	adc #$21
 	cmp ball_x
-	bcc move_ball
+	bcc check_lose
 
 	; The paddle is in the right spot!
 	lda #0
 	sta ball_dy
 
+check_lose:
+	lda ball_y
+	cmp #$f0
+	bcc move_ball
+
+	lda #State::LOSE_LIFE
+	sta $00
+	jsr change_state
+	rts
 
 move_ball:
 	lda ball_moving
@@ -465,7 +483,7 @@ change_state:
 
 @new_game:
 	cmp #State::NEW
-	bne @playing
+	bne @lose_life
 
 	; Disable NMI, sprites, and background
 	lda #$00
@@ -475,7 +493,7 @@ change_state:
 	; Load sprites for main game play
 	jsr clear_sprites
 	jsr load_sprites
-
+	
 	; Reset the palette timer and paddle palette state
 	lda #$00
 	sta palette_timer
@@ -503,6 +521,33 @@ change_state:
 	; Enable sprites and background
 	lda #%00011110
 	sta $2001
+
+	jmp @return
+
+@lose_life:
+	cmp #State::LOSE_LIFE
+	bne @playing
+
+	; Disable NMI
+	lda #$00
+	sta $2000
+
+	; TODO Add lives code here
+
+	; Reset ball and paddle position
+	lda #$00
+	sta ball_dx
+	sta ball_dy
+	sta ball_moving
+	jsr load_sprites
+
+	; Jump into the "playing state"
+	lda #State::PLAYING
+	sta game_state
+
+	; Enable NMI
+	lda #%10000000
+	sta $2000
 
 	jmp @return
 
@@ -635,15 +680,16 @@ draw_title_screen:
 	bne @row
 	rts
 
-
+;
+; Draws the main game board to the nametable
+;
 draw_board:
 	jsr clear_nametable
 
 	; Load the attribute table
-
 	ldx #$00
 	vram #$23, #$c0
-@attr:	lda board_palette, x
+@attr:	lda board_attr, x
 	sta $2007
 	inx
 	cpx #$40
@@ -841,33 +887,72 @@ get_tile:
 ;	$01 - High byte of the vram addres
 ;
 block_hit:
-	pha
-
+	; Check the tile to see if it's a block
 	vram $01, $00
 	lda $2007
 	lda $2007
 
+	; t >= $42
+	clc
 	cmp #$42
+	bcc @return
+
+	; t < $4A
+	clc
+	cmp #$4A
+	bcs @return
+
+	; Check to see if the tile is the left or right side
+	; of the block
+	tax
+	and #$01
 	bne @right
 
-	vram $01, $00
-	lda #$ff
-	sta $2007
-	sta $2007
+@left:
+	txa
+	clc
+	adc #$02
+	cmp #$46;block_destroyed
+	beq @clear_left
 
+	vram $01, $00
+	sta $2007
+	tax
+	inx
+	stx $2007
 	jmp @return
 
-@right:	cmp #$43
-	bne @return
+@clear_left:
+	lda #$ff
+	vram $01, $00
+	sta $2007
+	sta $2007
+	jmp @return
+
+@right:
+	txa
+	clc
+	adc #$01
+	cmp #$46;block_destroyed
+	beq @clear_right
 
 	dec $00
 	vram $01, $00
+	sta $2007
+	tax
+	inx
+	stx $2007
+	jmp @return
+
+
+@clear_right:
 	lda #$ff
+	dec $00
+	vram $01, $00
 	sta $2007
 	sta $2007
-	
+
 @return:
-	pla
 	rts
 
 
@@ -904,7 +989,7 @@ paddle_cycle:
 	.byte $28, $18, $08, $0f
 
 
-board_palette:
+board_attr:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
@@ -913,10 +998,6 @@ board_palette:
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
-
-
-
-
 
 
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
