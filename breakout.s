@@ -315,6 +315,7 @@ check_left:
 	tile #0, #4
 	cmp #$ff
 	beq check_y
+	jsr block_hit
 	lda #1
 	sta ball_dx
 	jmp check_y
@@ -324,6 +325,7 @@ check_right:
 	tile #7, #3
 	cmp #$ff
 	beq check_y
+	jsr block_hit
 	lda #0
 	sta ball_dx
 
@@ -336,6 +338,7 @@ check_up:
 	tile #3, #0
 	cmp #$ff
 	beq check_paddle
+	jsr block_hit
 	lda #1
 	sta ball_dy
 	jmp check_paddle
@@ -345,6 +348,7 @@ check_down:
 	tile #4, #7
 	cmp #$ff
 	beq check_paddle
+	jsr block_hit
 	lda #0
 	sta ball_dy
 
@@ -732,6 +736,10 @@ block_row:
 ; 	$00 - Low byte of the 16-bit value operand
 ; 	$01 - High byte of the 16-bit value operand
 ; 	$02 - Shift operand
+;
+; Return:
+; 	$00 - The low byte of the result
+;	$01 - The high byte of the result
 asl16:
 	ldx $02
 @loop:	asl $01
@@ -751,6 +759,10 @@ asl16:
 ; 	$01 - High byte of the first operand
 ; 	$02 - Low byte of the second operand
 ; 	$03 - High byte of the second operand
+;
+; Return:
+; 	$00 - The low byte of the result
+;	$01 - The high byte of the result
 add16:
 	clc
 	lda $02
@@ -768,7 +780,9 @@ add16:
 ;	$01 - y-coordinate
 ;
 ; Return:
-; 	A - The value of the tile at that address
+; 	A   - The value of the tile at that address
+;	$00 - The low byte of the address
+; 	$01 - The high byte of the address
 get_tile:
 	; Nab the x value and hold onto it
 	ldy $00 
@@ -803,6 +817,7 @@ get_tile:
 	lda $01
 	adc #$20
 	sta $2006
+	sta $01
 
 	lda $00
 	sta $2006
@@ -811,6 +826,46 @@ get_tile:
 	lda $2007
 
 	rts
+
+;
+; Determines if the given vram address represents a block
+; and causes a game "collision" to occur if it is.
+;
+; Params:
+;	$00 - Low byte of the vram address
+;	$01 - High byte of the vram addres
+;
+block_hit:
+	pha
+
+	vram $01, $00
+	lda $2007
+	lda $2007
+
+	cmp #$42
+	bne @right
+
+	vram $01, $00
+	lda #$ff
+	sta $2007
+	sta $2007
+
+	jmp @return
+
+@right:	cmp #$43
+	bne @return
+
+	dec $00
+	vram $01, $00
+	lda #$ff
+	sta $2007
+	sta $2007
+	
+@return:
+	pla
+	rts
+
+
 
 ;;;;;;;;;;;;;; Palettes, Nametables, etc. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
