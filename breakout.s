@@ -15,17 +15,21 @@ reset:
 ;;;;;;;;;;;;;; Macros ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .macro vram hi, lo
+	pha
 	lda hi
 	sta $2006
 	lda lo
 	sta $2006
+	pla
 .endmacro
 
 .macro strobe
+	pha
 	lda #$01
 	sta $4016
 	lda #$00
 	sta $4016
+	pla
 .endmacro
 
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -337,9 +341,6 @@ pause_loop:
 @done:	rts
 
 
-
-
-
 ;
 ; Sets the game state
 ;
@@ -362,7 +363,7 @@ change_state:
 
 	; Load the title screen
 	jsr clear_sprites
-	jsr title_screen
+	jsr draw_title_screen
 
 	; Enable NMI
 	lda #%10000000
@@ -400,12 +401,15 @@ change_state:
 	lda #STATE_PLAYING
 	sta game_state
 	
+	; Draw the game board
+	jsr draw_board
+
 	; Enable NMI
 	lda #%10000000
 	sta $2000
 	
-	; Disable Background
-	lda #%00010110
+	; Enable sprites and background
+	lda #%00011110
 	sta $2001
 
 	jmp @return
@@ -415,7 +419,7 @@ change_state:
 	bne @paused
 
 	; Swtich to color mode
-	lda #%00010110
+	lda #%00011110
 	sta $2001
 
 	jmp @return
@@ -425,7 +429,7 @@ change_state:
 	bne @game_over
 
 	; Switch to monochrome mode
-	lda #%00010111
+	lda #%00011111
 	sta $2001
 
 	jmp @return
@@ -437,6 +441,8 @@ change_state:
 @return:
 	rts
 
+
+;;;;;;;;;;;;;; Drawing Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
 ;
@@ -482,7 +488,10 @@ load_palette:
 ;
 ; Draws the game's main title screen to VRAM
 ;
-title_screen:
+draw_title_screen:
+	jsr clear_nametable
+
+	; Load the attribute table
 	ldx #$40
 	vram #$23, #$c0
 	lda #0
@@ -490,7 +499,7 @@ title_screen:
 	dex
 	bne @loop
 
-draw_logo:
+	; Draw the logo into the nametable
 	lo = $20
 	hi = $21
 
@@ -521,6 +530,115 @@ draw_logo:
 
 
 draw_board:
+	jsr clear_nametable
+
+	; Load the attribute table
+
+	ldx #$00
+	vram #$23, #$c0
+@attr:	lda board_palette, x
+	sta $2007
+	inx
+	cpx #$40
+	bne @attr
+
+	; Top left corner (1, 1)
+	vram #$20, #$21
+	lda #$4b
+	sta $2007
+
+	; Top right corner (30, 1)
+	vram #$20, #$3e
+	lda #$4d
+	sta $2007
+
+	; Bottom left corner (1, 26)
+	vram #$23, #$21
+	lda #$51
+	sta $2007
+
+	; Bottom right corner (30, 26)
+	vram #$23, #$3e
+	lda #$53
+	sta $2007
+
+	; Top Border
+	vram #$20, #$22
+	ldx #$1c
+	lda #$4c
+@loop:	sta $2007
+	dex
+	bne @loop
+
+	; Set write increments to 32
+	lda #%00000100
+	sta $2000
+	
+	; Left Border
+	vram #$20, #$41
+	lda #$4e
+	ldx #$17
+@loop2:	sta $2007
+	dex
+	bne @loop2
+
+	; Right Border
+	vram #$20, #$5e
+	lda #$50
+	ldx #$17
+@loop3:	sta $2007
+	dex
+	bne @loop3
+
+	; Set write increments back to 1
+	lda #%00000000
+	sta $2000
+
+
+	; Setup the blocks
+
+	vram #$20, #$82
+	jsr block_row
+
+	vram #$20, #$a2
+	jsr block_row
+
+	vram #$20, #$c2
+	jsr block_row
+
+	vram #$20, #$e2
+	jsr block_row
+
+	vram #$21, #$02
+	jsr block_row
+
+	vram #$21, #$22
+	jsr block_row
+
+
+	rts
+
+block_row:
+	ldx #$0e
+@loop:	lda #$42
+	sta $2007
+	lda #$43
+	sta $2007
+	dex
+	bne @loop
+	rts
+
+
+clear_nametable:
+	ldx #$00
+	ldy #$04
+	lda #$FF
+	vram #$20, #$00
+@loop:	sta $2007
+	inx
+	bne @loop
+	dey
+	bne @loop
 	rts
 
 
@@ -530,8 +648,8 @@ draw_board:
 palette:
 	; Background
 	.byte $0f, $03, $19, $00
-	.byte $0f, $00, $00, $00
-	.byte $0f, $00, $00, $00
+	.byte $0f, $00, $10, $20
+	.byte $0f, $09, $19, $29
 	.byte $0f, $00, $00, $00
 
 	; Sprites
@@ -557,6 +675,24 @@ paddle_cycle:
 	.byte $28, $18, $08, $0f
 
 
+board_palette:
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+
+
+
+
+
+
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .segment "CHARS"
@@ -564,7 +700,9 @@ paddle_cycle:
 .include "include/paddle.s"	; $40 - $41
 .include "include/blocks.s"	; $42 - $49
 .include "include/ball.s"	; $4A
-.include "include/wall.s"	; $4B - $53
+.include "include/wall.s"	; $4B - $54
+
+
 
 ;;;;;;;;;;;;;; Vectors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
