@@ -32,6 +32,16 @@ reset:
 	pla
 .endmacro
 
+.macro tile add_x, add_y
+	lda ball_x
+	adc add_x
+	sta $00
+	lda ball_y
+	adc add_y
+	sta $01
+	jsr get_tile
+.endmacro
+
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main:
 	; Palette Cycle Timer
@@ -64,6 +74,9 @@ main:
 
 	; Whether or not the game is paused
 	game_paused = $0307
+
+	; Paddle position
+	paddle_x = $0207
 
 	; Game states
 	STATE_TITLE = 0
@@ -154,20 +167,20 @@ play_loop:
 
 
 	; A - Gets the ball moving at the start of the game
-check_a:
+button_a:
 	lda #$01
 	and $4016
-	beq check_start
+	beq button_start
 
 	lda ball_moving
-	bne check_start
+	bne button_start
 
 	lda #$01
 	sta ball_moving
 
 
 	; Start - Pauses the game
-check_start:
+button_start:
 	lda $4016 ; Skip B
 	lda $4016 ; Skip Select
 	
@@ -176,7 +189,7 @@ check_start:
 
 	lda #$01
 	and $4016
-	beq check_left
+	beq button_left
 
 	lda #1
 	sta start_down
@@ -192,13 +205,13 @@ check_start:
 	sta start_down
 
 	
-check_left:
+button_left:
 	lda $4016 ; Skip Up
 	lda $4016 ; Skip Down
 
 	lda #$01
 	and $4016
-	beq check_right
+	beq button_right
 
 	lda $0207
 	cmp #$10
@@ -229,7 +242,7 @@ check_left:
 @done_left:
 	jmp check_palette_timer
 
-check_right:
+button_right:
 	lda #$01
 	and $4016
 	beq check_palette_timer
@@ -286,6 +299,75 @@ check_palette_timer:
 
 
 bound_ball:
+	
+
+check_hit:
+	bit $2002
+	bvs check_x
+	jmp check_paddle
+
+check_x:
+	lda ball_dx
+	bne check_right
+
+check_left:
+	; (x, y+4)
+	tile #0, #4
+	cmp #$ff
+	beq check_y
+	lda #1
+	sta ball_dx
+	jmp check_y
+
+check_right:
+	; (x+7, y+3)
+	tile #7, #3
+	cmp #$ff
+	beq check_y
+	lda #0
+	sta ball_dx
+
+check_y:
+	lda ball_dy
+	bne check_down
+
+check_up:
+	; (x+3, y)
+	tile #3, #0
+	cmp #$ff
+	beq check_paddle
+	lda #1
+	sta ball_dy
+	jmp check_paddle
+
+check_down:
+	; (x+4, y+7)
+	tile #4, #7
+	cmp #$ff
+	beq check_paddle
+	lda #0
+	sta ball_dy
+
+check_paddle:
+	lda ball_y
+	cmp #$c0
+	bne move_ball
+
+	; ball_x >= paddle_x
+	lda ball_x
+	cmp paddle_x
+	bcc move_ball
+
+	; paddle_x + 33 >= ball_x
+	clc
+	lda paddle_x
+	adc #$21
+	cmp ball_x
+	bcc move_ball
+
+	; The paddle is in the right spot!
+	lda #0
+	sta ball_dy
 
 
 move_ball:
@@ -450,13 +532,28 @@ change_state:
 ; Clears sprite memory
 ;
 clear_sprites:
-	lda #$fe
+	lda #$ff
 	ldx #$00
 @clear:	sta $0200, x
 	inx
 	bne @clear
 	rts
 
+
+;
+; Clears nametable memory
+;
+clear_nametable:
+	ldx #$00
+	ldy #$04
+	lda #$FF
+	vram #$20, #$00
+@loop:	sta $2007
+	inx
+	bne @loop
+	dey
+	bne @loop
+	rts
 
 ;
 ; Loads sprites into sprite memory
@@ -595,29 +692,26 @@ draw_board:
 	lda #%00000000
 	sta $2000
 
-
 	; Setup the blocks
 	vram #$20, #$82
 	jsr block_row
-
 	vram #$20, #$a2
 	jsr block_row
-
 	vram #$20, #$c2
 	jsr block_row
-
 	vram #$20, #$e2
 	jsr block_row
-
 	vram #$21, #$02
 	jsr block_row
-
 	vram #$21, #$22
 	jsr block_row
 
-
 	rts
 
+;
+; Draws a row of game blocks.
+; Note: Call this after setting the vram address with $2006
+;
 block_row:
 	ldx #$0e
 @loop:	lda #$42
@@ -629,19 +723,94 @@ block_row:
 	rts
 
 
-clear_nametable:
-	ldx #$00
-	ldy #$04
-	lda #$FF
-	vram #$20, #$00
-@loop:	sta $2007
-	inx
-	bne @loop
-	dey
+;;;;;;;;;;;;;; Lookup & Math Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+; Performs a 16-bit arithmetic shift left.
+; 
+; Params:
+; 	$00 - Low byte of the 16-bit value operand
+; 	$01 - High byte of the 16-bit value operand
+; 	$02 - Shift operand
+asl16:
+	ldx $02
+@loop:	asl $01
+	asl $00
+	bcc @cont
+	inc $01
+@cont:	dex
 	bne @loop
 	rts
 
 
+; Performs an add with two 16-bit operands storing
+; the result in the first operand.
+;
+; Params:
+; 	$00 - Low byte of the first operand
+; 	$01 - High byte of the first operand
+; 	$02 - Low byte of the second operand
+; 	$03 - High byte of the second operand
+add16:
+	clc
+	lda $02
+	adc $00
+	sta $00
+	lda $03
+	adc $01
+	sta $01
+	rts
+
+; Find the tile in the nametable at the point (x, y).
+;
+; Params:
+; 	$00 - x-coordinate
+;	$01 - y-coordinate
+;
+; Return:
+; 	A - The value of the tile at that address
+get_tile:
+	; Nab the x value and hold onto it
+	ldy $00 
+
+	; Calculate the offset into VRAM
+	; Tile(x, y) = ($00, $01) = (y / 8) * 32 + (x / 8)
+
+	; (y / 8) * 32 = (y & #$f8) << 2
+	lda $01
+	and #$f8
+	sta $00
+	lda #0
+	sta $01
+	lda #2
+	sta $02
+	jsr asl16
+
+	; (x / 8)
+	tya
+	lsr
+	lsr
+	lsr
+
+	; [(y/8) * 32] + (x/8)
+	sta $02
+	lda #0
+	sta $03
+	jsr add16
+
+
+	; Find that tile in VRAM
+	lda $01
+	adc #$20
+	sta $2006
+
+	lda $00
+	sta $2006
+
+	lda $2007
+	lda $2007
+
+	rts
 
 ;;;;;;;;;;;;;; Palettes, Nametables, etc. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
