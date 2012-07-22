@@ -201,6 +201,7 @@ check_left:
 	beq check_right
 
 	lda $0207
+	cmp #$10
 	beq check_palette_timer
 
 	ldx #$02
@@ -234,7 +235,7 @@ check_right:
 	beq check_palette_timer
 
 	lda $0213
-	cmp #$f6
+	cmp #$e6
 	beq check_palette_timer
 
 	ldx #$02
@@ -596,7 +597,6 @@ draw_board:
 
 
 	; Setup the blocks
-
 	vram #$20, #$82
 	jsr block_row
 
@@ -678,13 +678,10 @@ paddle_cycle:
 board_palette:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
-
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
-
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
-
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 
