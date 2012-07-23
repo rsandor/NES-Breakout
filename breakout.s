@@ -42,6 +42,28 @@ reset:
 	jsr get_tile
 .endmacro
 
+.macro addr label
+	pha
+	lda #.LOBYTE(label)
+	sta $00
+	lda #.HIBYTE(label)
+	sta $01
+	pla
+.endmacro
+
+.macro load_attrs label
+.scope
+	vram #$23, #$c0
+	ldx #$00
+@loop:	lda label, x
+	sta $2007
+	inx
+	cpx #$40
+	bne @loop
+.endscope
+.endmacro
+
+
 ;;;;;;;;;;;;;; Global Variables ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -469,7 +491,7 @@ change_state:
 
 	; Load the title screen
 	jsr clear_sprites
-	jsr draw_title_screen
+	jsr draw_title
 
 	; Wait for VBLANK
 @wait:	bit $2002
@@ -646,24 +668,23 @@ load_palette:
 ;
 ; Draws the game's main title screen to VRAM
 ;
-draw_title_screen:
+draw_title:
 	jsr clear_nametable
 
 	; Load the attribute table
-	ldx #$40
-	vram #$23, #$c0
-	lda #0
-@loop:	sta $2007
-	dex
-	bne @loop
-
-	; Draw the logo into the nametable
+	load_attrs title_attr
+	
+.scope	; Draw the logo into the nametable
+	col = 8
+	row = 10
+	address = $2000 + col + (row * $20)
+	
 	lo = $20
 	hi = $21
-
-	lda #$21
+	
+	lda #.HIBYTE(address)
 	sta hi
-	lda #$88
+	lda #.LOBYTE(address)
 	sta lo
 
 	ldy #$00
@@ -684,6 +705,18 @@ draw_title_screen:
 
 	cpy #$40
 	bne @row
+.endscope
+
+	
+.scope	; print "Press Start"
+	col = 10
+	row = 17
+	address = $2000 + col + (row * $20)
+	vram #.HIBYTE(address), #.LOBYTE(address)
+	addr press_start
+	jsr prints
+.endscope
+
 	rts
 
 ;
@@ -693,13 +726,7 @@ draw_board:
 	jsr clear_nametable
 
 	; Load the attribute table
-	ldx #$00
-	vram #$23, #$c0
-@attr:	lda board_attr, x
-	sta $2007
-	inx
-	cpx #$40
-	bne @attr
+	load_attrs board_attr
 
 	; Top left corner (1, 1)
 	vram #$20, #$21
@@ -784,7 +811,27 @@ block_row:
 	rts
 
 
-
+;
+; Prints a null terminated string into VRAM. Strings are
+; limited to 256 characters in length. 
+;
+; Note: Caller is responsible for setting the appropriate 
+;       VRAM address.
+;
+; Params:
+;	$00 - Low byte of the memory address of the string.
+;	$01 - High byte of the memory address of the string.
+;
+prints:
+	ldy #$00
+@loop:	lda ($00), y
+	beq @break
+	clc
+	adc #$34
+	sta $2007
+	iny
+	bne @loop
+@break:	rts
 
 
 ;;;;;;;;;;;;;; Lookup & Math Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -998,6 +1045,17 @@ paddle_cycle:
 	.byte $28, $18, $08, $0f
 
 
+title_attr:
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00
+
+
 board_attr:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
@@ -1008,6 +1066,12 @@ board_attr:
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 
+press_start:
+	.byte "PRESS START", $00
+
+score:
+	.byte "SCORE:", $00
+
 
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1016,10 +1080,8 @@ board_attr:
 .include "include/paddle.s"	; $40 - $41
 .include "include/blocks.s"	; $42 - $49
 .include "include/ball.s"	; $4a
-.include "include/wall.s"	; $4b - $54
-.include "include/font.s"	; $55 - $ad
-
-
+.include "include/wall.s"	; $4b - $53
+.include "include/font.s"	; $54 - $b9
 
 ;;;;;;;;;;;;;; Vectors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
