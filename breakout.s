@@ -55,11 +55,27 @@ reset:
 .scope
 	vram #$23, #$c0
 	ldx #$00
-@loop:	lda label, x
+@__load_attrs_loop:	
+	lda label, x
 	sta $2007
 	inx
 	cpx #$40
-	bne @loop
+	bne @__load_attrs_loop
+.endscope
+.endmacro
+
+
+.macro block_row hi, lo
+.scope
+	vram hi, lo
+	ldx #$0e
+@__block_row_loop:
+	lda #$42
+	sta $2007
+	lda #$43
+	sta $2007
+	dex
+	bne @__block_row_loop
 .endscope
 .endmacro
 
@@ -728,10 +744,14 @@ draw_board:
 	; Load the attribute table
 	load_attrs board_attr
 
+
+.scope
 	; Top left corner (1, 1)
-	vram #$20, #$21
+	address = $2000 + 1 + ($20 * 1)
+	vram #.HIBYTE(address), #.LOBYTE(address)
 	lda #$4b
 	sta $2007
+
 
 	; Top right corner (30, 1)
 	vram #$20, #$3e
@@ -747,6 +767,8 @@ draw_board:
 	vram #$23, #$3e
 	lda #$53
 	sta $2007
+
+.endscope
 
 	; Top Border
 	vram #$20, #$22
@@ -781,33 +803,13 @@ draw_board:
 	sta $2000
 
 	; Setup the blocks
-	vram #$20, #$82
-	jsr block_row
-	vram #$20, #$a2
-	jsr block_row
-	vram #$20, #$c2
-	jsr block_row
-	vram #$20, #$e2
-	jsr block_row
-	vram #$21, #$02
-	jsr block_row
-	vram #$21, #$22
-	jsr block_row
+	block_row #$20, #$82
+	block_row #$20, #$a2
+	block_row #$20, #$c2
+	block_row #$20, #$e2
+	block_row #$21, #$02
+	block_row #$21, #$22
 
-	rts
-
-;
-; Draws a row of game blocks.
-; Note: Call this after setting the vram address with $2006
-;
-block_row:
-	ldx #$0e
-@loop:	lda #$42
-	sta $2007
-	lda #$43
-	sta $2007
-	dex
-	bne @loop
 	rts
 
 
@@ -1050,7 +1052,7 @@ title_attr:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
-	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $55, $55, $55, $55, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
