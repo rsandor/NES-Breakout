@@ -471,6 +471,10 @@ change_state:
 	jsr clear_sprites
 	jsr draw_title_screen
 
+	; Wait for VBLANK
+@wait:	bit $2002
+	bpl @wait
+
 	; Enable NMI
 	lda #%10000000
 	sta $2000
@@ -514,11 +518,13 @@ change_state:
 	; Draw the game board
 	jsr draw_board
 
-	; Enable NMI
+	; Wait for VBLANK
+@wait2:	bit $2002
+	bpl @wait2
+
+	; Enable NMI, sprites and background
 	lda #%10000000
 	sta $2000
-	
-	; Enable sprites and background
 	lda #%00011110
 	sta $2001
 
@@ -778,6 +784,9 @@ block_row:
 	rts
 
 
+
+
+
 ;;;;;;;;;;;;;; Lookup & Math Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
@@ -1006,8 +1015,9 @@ board_attr:
 .include "include/logo.s"	; $00 - $3f
 .include "include/paddle.s"	; $40 - $41
 .include "include/blocks.s"	; $42 - $49
-.include "include/ball.s"	; $4A
-.include "include/wall.s"	; $4B - $54
+.include "include/ball.s"	; $4a
+.include "include/wall.s"	; $4b - $54
+.include "include/font.s"	; $55 - $ad
 
 
 
