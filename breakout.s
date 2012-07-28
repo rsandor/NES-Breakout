@@ -128,7 +128,10 @@ paddle_x = $0207
 ;
 ; TODO Not working yet, fixme!
 ;
-block_destroyed = $0208
+block_destroyed = $0308
+
+; Player Lives
+lives = $0309
 
 
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -548,6 +551,10 @@ change_state:
 	; Reset ball moving and game paused
 	sta ball_moving
 	sta game_paused
+
+	; Reset lives to 3
+	lda #$03
+	sta lives
 
 	; Set the game state to "playing"
 	lda #State::PLAYING
@@ -970,7 +977,7 @@ block_hit:
 	txa
 	clc
 	adc #$02
-	cmp #$46;block_destroyed
+	cmp #$4a;block_destroyed
 	beq @clear_left
 
 	vram $01, $00
@@ -991,7 +998,7 @@ block_hit:
 	txa
 	clc
 	adc #$01
-	cmp #$46;block_destroyed
+	cmp #$4a;block_destroyed
 	beq @clear_right
 
 	dec $00
@@ -1069,10 +1076,10 @@ board_attr:
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 
 press_start:
-	.byte "PRESS START", $00
+	.asciiz "PRESS START"
 
 score:
-	.byte "SCORE:", $00
+	.asciiz "SCORE:"
 
 
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
