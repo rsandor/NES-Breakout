@@ -51,6 +51,19 @@ reset:
 	pla
 .endmacro
 
+.macro addr2 l1, l2
+	pha
+	lda #.LOBYTE(l1)
+	sta $00
+	lda #.HIBYTE(l1)
+	sta $01
+	lda #.LOBYTE(l2)
+	sta $02
+	lda #.HIBYTE(l2)
+	sta $03
+	pla
+.endmacro
+
 .macro load_attrs label
 .scope
 	vram #$23, #$c0
@@ -63,7 +76,6 @@ reset:
 	bne @__load_attrs_loop
 .endscope
 .endmacro
-
 
 .macro block_row hi, lo
 .scope
@@ -82,18 +94,33 @@ reset:
 
 ;;;;;;;;;;;;;; Global Variables ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+palette_timer 	= $0300 ; Pallete cycle timer and delay
+paddle_state 	= $0301 ; Paddle's palette state
+game_state 	= $0302 ; Master game states
 
-; Pallet cycle timer and delay
-palette_timer = $0300
-palette_delay = $0b
+ball_dx 	= $0303 ; Ball's X direction
+ball_dy 	= $0304 ; Ball's Y direction
 
-; Paddle's palette state
-paddle_state = $0301
+ball_moving 	= $0305 ; Whether or not the ball is moving
+start_down 	= $0306 ; Whether or not start was down last frame
 
-; Master game states
-game_state = $0302
+lives 		= $0307 ; Player Lives
+score 		= $0308 ; Score in BCD form (8-bytes)
 
-.enum State
+; Ball position
+ball_x = $0203
+ball_y = $0200
+
+; Paddle position
+paddle_x = $0207
+
+; Constants
+PALETTE_DELAY 	= $0b
+PADDLE_Y 	= $d8
+NUMBER_OFFSET	= $64
+
+; Game States Enumeration
+.enum GameState
 	TITLE
 	NEW
 	PLAYING
@@ -102,37 +129,6 @@ game_state = $0302
 	GAMEOVER
 .endenum
 
-; Ball position
-ball_x = $0203
-ball_y = $0200
-
-; Ball direction
-ball_dx = $0303
-ball_dy = $0304
-
-; Whether or not the ball is moving
-ball_moving = $0305
-
-; Flag that determines if start was held last frame
-start_down = $0306
-
-; Whether or not the game is paused
-game_paused = $0307
-
-; Paddle position
-paddle_x = $0207
-
-; Number of hits required to destroy a block
-; Can be: #$44, #$46, #$48, #$4A
-; Used in conjunction with the 'block_hit' routine
-;
-; TODO Not working yet, fixme!
-;
-block_destroyed = $0308
-
-; Player Lives
-lives = $0309
-
 
 ;;;;;;;;;;;;;; Main Program ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 main:
@@ -140,12 +136,9 @@ main:
 	jsr load_palette
 
 	; Set the game state to the title screen
-	lda #State::TITLE
+	lda #GameState::TITLE
 	sta $00
 	jsr change_state
-
-	lda #$44
-	sta block_destroyed
 
 	; Reset VRAM address
 	vram #0, #0
@@ -162,17 +155,19 @@ game_loop:
 	jsr title_loop
 	jmp cleanup
 
-@play:	cmp #State::PLAYING
+@play:	cmp #GameState::PLAYING
 	bne @pause
 	jsr play_loop
 	jmp cleanup
 
-@pause:	cmp #State::PAUSED
+@pause:	cmp #GameState::PAUSED
 	bne @over
 	jsr pause_loop
 	jmp cleanup
 
-@over:  ; TODO Implement me
+@over:  cmp #GameState::GAMEOVER
+	bne cleanup
+	jsr game_over_loop
 
 cleanup:
 	lda #$00 	; Draw sprites
@@ -196,9 +191,14 @@ title_loop:
 	lda $4016
 	lda $4016
 
+	; Check to see if the start button is still down
+	lda start_down
+	bne @skip
+
 	; Read the start button
 	lda #$01
 	and $4016
+	sta start_down
 	beq @done
 
 	; Indicate that the start button is being pressed
@@ -206,12 +206,18 @@ title_loop:
 	sta start_down
 
 	; Change to the new game state if they pressed start
-	lda #State::NEW
+	lda #GameState::NEW
 	sta $00
 	jsr change_state
+	jmp @done
+
+@skip:	lda #$01
+	and $4016
+	sta start_down
 
 @done:	rts
-	
+
+
 ;
 ; Game loop code for the main game
 ;
@@ -248,7 +254,7 @@ button_start:
 	lda #1
 	sta start_down
 
-	lda #State::PAUSED
+	lda #GameState::PAUSED
 	sta $00
 	jsr change_state
 	rts
@@ -333,7 +339,7 @@ button_right:
 check_palette_timer:
 	inc palette_timer
 	ldx palette_timer
-	cpx #palette_delay
+	cpx #PALETTE_DELAY
 	beq @cycle_palette
 	jmp @done
 	
@@ -405,18 +411,20 @@ check_down:
 
 check_paddle:
 	lda ball_y
-	cmp #$c0
+	cmp #(PADDLE_Y - $08)
 	bne check_lose
 
 	; ball_x >= paddle_x
+	clc
 	lda ball_x
+	adc #4
 	cmp paddle_x
 	bcc check_lose
 
-	; paddle_x + 33 >= ball_x
+	; paddle_x + 35 >= ball_x
 	clc
 	lda paddle_x
-	adc #$21
+	adc #35
 	cmp ball_x
 	bcc check_lose
 
@@ -429,7 +437,7 @@ check_lose:
 	cmp #$f0
 	bcc move_ball
 
-	lda #State::LOSE_LIFE
+	lda #GameState::LOSE_LIFE
 	sta $00
 	jsr change_state
 	rts
@@ -476,7 +484,7 @@ pause_loop:
 	beq @done
 
 	sta start_down
-	lda #State::PLAYING
+	lda #GameState::PLAYING
 	sta $00
 	jsr change_state
 	rts
@@ -486,6 +494,36 @@ pause_loop:
 	sta start_down
 
 @done:	rts
+
+
+;
+; Loop for the game over screen
+;
+game_over_loop:
+	strobe
+	lda $4016
+	lda $4016
+	lda $4016
+
+	lda start_down
+	bne @skip
+
+	lda #$01
+	and $4016
+	beq @done
+
+	sta start_down
+	lda #GameState::TITLE
+	sta $00
+	jsr change_state
+	rts
+
+@skip:	lda #$01
+	and $4016
+	sta start_down
+
+@done:	rts
+
 
 
 ;
@@ -500,7 +538,7 @@ change_state:
 	sta game_state
 
 @title: 
-	cmp #State::TITLE
+	cmp #GameState::TITLE
 	bne @new_game
 
 	; Disable NMI, sprites, and background
@@ -527,7 +565,7 @@ change_state:
 	jmp @return
 
 @new_game:
-	cmp #State::NEW
+	cmp #GameState::NEW
 	bne @lose_life
 
 	; Disable NMI, sprites, and background
@@ -550,14 +588,21 @@ change_state:
 
 	; Reset ball moving and game paused
 	sta ball_moving
-	sta game_paused
 
 	; Reset lives to 3
-	lda #$03
+	lda #3
 	sta lives
 
+	; Reset score to 0
+	ldx #0
+	lda #0
+@score:	sta score, x
+	inx
+	cpx #8
+	bne @score
+
 	; Set the game state to "playing"
-	lda #State::PLAYING
+	lda #GameState::PLAYING
 	sta game_state
 	
 	; Draw the game board
@@ -576,14 +621,26 @@ change_state:
 	jmp @return
 
 @lose_life:
-	cmp #State::LOSE_LIFE
+	cmp #GameState::LOSE_LIFE
 	bne @playing
 
 	; Disable NMI
 	lda #$00
 	sta $2000
 
-	; TODO Add lives code here
+	; Decrement Lives
+	dec lives
+	ldx lives
+	bne @game_continue
+	
+	; Lives == 0, game is now over
+	lda #GameState::GAMEOVER
+	sta game_state
+	jmp @game_over
+
+@game_continue:
+	; Draw the update lives to the board
+	jsr draw_lives
 
 	; Reset ball and paddle position
 	lda #$00
@@ -593,7 +650,7 @@ change_state:
 	jsr load_sprites
 
 	; Jump into the "playing state"
-	lda #State::PLAYING
+	lda #GameState::PLAYING
 	sta game_state
 
 	; Enable NMI
@@ -603,7 +660,7 @@ change_state:
 	jmp @return
 
 @playing:
-	cmp #State::PLAYING
+	cmp #GameState::PLAYING
 	bne @paused
 
 	; Swtich to color mode
@@ -613,7 +670,7 @@ change_state:
 	jmp @return
 
 @paused:
-	cmp #State::PAUSED
+	cmp #GameState::PAUSED
 	bne @game_over
 
 	; Switch to monochrome mode
@@ -623,8 +680,23 @@ change_state:
 	jmp @return
 
 @game_over:
-	; TODO Implement me
+	; Disable NMI, sprites, and background
+	lda #$00
+	sta $2000
+	sta $2001
 
+	; Draw the game over screen
+	jsr draw_game_over
+
+	; Wait for vblank
+@wait3:	bit $2002
+	bpl @wait3
+
+	; Enable the background and NMI
+	lda #%10000000
+	sta $2000
+	lda #%00001000
+	sta $2001
 
 @return:
 	rts
@@ -751,35 +823,40 @@ draw_board:
 	; Load the attribute table
 	load_attrs board_attr
 
-
 .scope
-	; Top left corner (1, 1)
-	address = $2000 + 1 + ($20 * 1)
-	vram #.HIBYTE(address), #.LOBYTE(address)
+	top = 4
+	left = 1
+	bottom = 27
+	right = 30
+
+	top_left = $2000 + left + ($20 * top)
+	top_right = $2000 + right + ($20 * top)
+	bottom_left = $2000 + left + ($20 * bottom)
+	bottom_right = $2000 + right + ($20 * bottom)
+
+	; Top left corner
+	vram #.HIBYTE(top_left), #.LOBYTE(top_left)
 	lda #$4b
 	sta $2007
 
-
-	; Top right corner (30, 1)
-	vram #$20, #$3e
+	; Top right corner
+	vram #.HIBYTE(top_right), #.LOBYTE(top_right)
 	lda #$4d
 	sta $2007
 
-	; Bottom left corner (1, 26)
-	vram #$23, #$21
+	; Bottom left corner
+	vram #.HIBYTE(bottom_left), #.LOBYTE(bottom_left)
 	lda #$51
 	sta $2007
 
-	; Bottom right corner (30, 26)
-	vram #$23, #$3e
+	; Bottom right corner
+	vram #.HIBYTE(bottom_right), #.LOBYTE(bottom_right)
 	lda #$53
 	sta $2007
 
-.endscope
-
 	; Top Border
-	vram #$20, #$22
-	ldx #$1c
+	vram #.HIBYTE(top_left+1), #.LOBYTE(top_left+1)
+	ldx #(right - left - 1)
 	lda #$4c
 @loop:	sta $2007
 	dex
@@ -790,17 +867,17 @@ draw_board:
 	sta $2000
 	
 	; Left Border
-	vram #$20, #$41
+	vram #.HIBYTE(top_left + 32), #.LOBYTE(top_left + 32)
 	lda #$4e
-	ldx #$17
+	ldx #(bottom-top-1)
 @loop2:	sta $2007
 	dex
 	bne @loop2
 
 	; Right Border
-	vram #$20, #$5e
+	vram #.HIBYTE(top_right + 32), #.LOBYTE(top_right + 32)
 	lda #$50
-	ldx #$17
+	ldx #(bottom-top-1)
 @loop3:	sta $2007
 	dex
 	bne @loop3
@@ -808,15 +885,64 @@ draw_board:
 	; Set write increments back to 1
 	lda #%00000000
 	sta $2000
+.endscope
+
+
+	; Draw score and lives
+	jsr draw_score
+	jsr draw_lives
+
 
 	; Setup the blocks
-	block_row #$20, #$82
+	;block_row #$20, #$82
 	block_row #$20, #$a2
 	block_row #$20, #$c2
 	block_row #$20, #$e2
 	block_row #$21, #$02
 	block_row #$21, #$22
 
+	rts
+
+
+;
+; Draws lives remaining text
+;
+draw_lives:
+.scope
+	lives_addr = $2000 + 2 + (2 * $20)
+	vram #.HIBYTE(lives_addr), #.LOBYTE(lives_addr)
+	addr lives_text
+	jsr prints
+
+	clc
+	lda lives
+	adc #NUMBER_OFFSET
+	sta $2007
+
+.endscope
+	rts
+
+
+;
+; Draws score text
+;
+draw_score:
+	; TODO Implement me
+	rts
+
+
+;
+; Draws the black "game over" doom screen :D
+;
+draw_game_over:
+	jsr clear_nametable
+	load_attrs game_over_attr
+.scope
+	text_addr = $2000 + 11 + (13 * $20)
+	vram #.HIBYTE(text_addr), #.LOBYTE(text_addr)
+	addr game_over_text
+	jsr prints
+.endscope
 	rts
 
 
@@ -841,6 +967,24 @@ prints:
 	iny
 	bne @loop
 @break:	rts
+
+;
+; Prints an 8-byte BCD number into VRAM
+;
+; Params:
+;	$00 - Low byte of the memory address of the bcd
+;	$01 - High byte of the memory address of the bcd
+;
+print_bcd:
+	ldy #7
+	clc
+@loop:	lda ($00), y
+	adc #NUMBER_OFFSET
+	sta $2007
+	dey
+	cpy #$ff
+	bne @loop
+	rts
 
 
 ;;;;;;;;;;;;;; Lookup & Math Subroutines ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -888,6 +1032,37 @@ add16:
 	adc $01
 	sta $01
 	rts
+
+
+;
+; Adds two 8-byte BCD values and stores the result in the first.
+;
+; Params:
+;	$00 - Low byte to address of first operand
+;	$01 - High byte to address of the first operand
+;	$02 - Low byte to address of second operand
+;	$03 - High byte to the address of the second operand
+;
+bcd_add:
+	clc
+	ldy #0
+@loop:	lda ($00), y
+	adc ($02), y
+	cmp #10
+	bne @skip
+	adc #5
+	and #$0f
+	sta ($00), y
+	iny
+	cpy #8
+	sec
+	bne @loop
+@skip:	sta ($00), y
+	iny
+	cpy #8
+	bne @loop
+	rts
+
 
 ; Find the tile in the nametable at the point (x, y).
 ;
@@ -977,7 +1152,7 @@ block_hit:
 	txa
 	clc
 	adc #$02
-	cmp #$4a;block_destroyed
+	cmp #$4a
 	beq @clear_left
 
 	vram $01, $00
@@ -998,7 +1173,7 @@ block_hit:
 	txa
 	clc
 	adc #$01
-	cmp #$4a;block_destroyed
+	cmp #$4a
 	beq @clear_right
 
 	dec $00
@@ -1029,7 +1204,7 @@ palette:
 	.byte $0f, $03, $19, $00
 	.byte $0f, $00, $10, $20
 	.byte $0f, $09, $19, $29
-	.byte $0f, $00, $00, $00
+	.byte $0f, $20, $10, $00
 
 	; Sprites
 	.byte $0f, $00, $08, $10
@@ -1040,13 +1215,13 @@ palette:
 
 sprites:
 	; Ball (sprite 0)
-	.byte $c0, $4a, %00000001, $7c
+	.byte (PADDLE_Y - $08), $4a, %00000001, $7c
 
 	; Paddle
-	.byte $c8, $40, %00000000, $70
-	.byte $c8, $41, %00000000, $78
-	.byte $c8, $41, %01000000, $80
-	.byte $c8, $40, %01000000, $88
+	.byte PADDLE_Y, $40, %00000000, $70
+	.byte PADDLE_Y, $41, %00000000, $78
+	.byte PADDLE_Y, $41, %01000000, $80
+	.byte PADDLE_Y, $40, %01000000, $88
 
 
 paddle_cycle:
@@ -1064,8 +1239,18 @@ title_attr:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 
+game_over_attr:
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
 
 board_attr:
+	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
 	.byte $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
@@ -1073,14 +1258,23 @@ board_attr:
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
-	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 
-press_start:
-	.asciiz "PRESS START"
 
-score:
-	.asciiz "SCORE:"
+;;;;;;;;;;;;;; Strings ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+press_start:	.asciiz "PRESS START"
+score_text:	.asciiz "SCORE:"
+lives_text:	.asciiz "LIVES:"
+game_over_text:	.asciiz "GAME OVER"
+
+
+;;;;;;;;;;;;;; BCD Constants ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+bcd_zero:	.byte 0,0,0,0,0,0,0,0
+hit1:		.byte 0,5,0,0,0,0,0,0
+hit2:		.byte 0,0,1,0,0,0,0,0
+hit3:		.byte 0,5,2,0,0,0,0,0
+hit4:		.byte 0,0,5,0,0,0,0,0
 
 ;;;;;;;;;;;;;; Pattern Table (CHR-ROM) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
