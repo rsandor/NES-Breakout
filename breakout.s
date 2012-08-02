@@ -23,6 +23,15 @@ reset:
 	pla
 .endmacro
 
+.macro vram_addr address
+	pha
+	lda #.HIBYTE(address)
+	sta $2006
+	lda #.LOBYTE(address)
+	sta $2006
+	pla
+.endmacro
+
 .macro strobe
 	pha
 	lda #$01
@@ -118,6 +127,7 @@ paddle_x = $0207
 PALETTE_DELAY 	= $0b
 PADDLE_Y 	= $d8
 NUMBER_OFFSET	= $64
+SPACE_OFFSET	= $54
 
 ; Game States Enumeration
 .enum GameState
@@ -741,7 +751,7 @@ load_sprites:
 @loop:	lda sprites, x
 	sta $0200, x
 	inx
-	cpx #$14
+	cpx #$18
 	bne @loop
 	rts
 
@@ -824,7 +834,7 @@ draw_board:
 	load_attrs board_attr
 
 .scope
-	top = 4
+	top = 3
 	left = 1
 	bottom = 27
 	right = 30
@@ -835,27 +845,27 @@ draw_board:
 	bottom_right = $2000 + right + ($20 * bottom)
 
 	; Top left corner
-	vram #.HIBYTE(top_left), #.LOBYTE(top_left)
+	vram_addr top_left
 	lda #$4b
 	sta $2007
 
 	; Top right corner
-	vram #.HIBYTE(top_right), #.LOBYTE(top_right)
+	vram_addr top_right
 	lda #$4d
 	sta $2007
 
 	; Bottom left corner
-	vram #.HIBYTE(bottom_left), #.LOBYTE(bottom_left)
+	vram_addr bottom_left
 	lda #$51
 	sta $2007
 
 	; Bottom right corner
-	vram #.HIBYTE(bottom_right), #.LOBYTE(bottom_right)
+	vram_addr bottom_right
 	lda #$53
 	sta $2007
 
 	; Top Border
-	vram #.HIBYTE(top_left+1), #.LOBYTE(top_left+1)
+	vram_addr (top_left + 1)
 	ldx #(right - left - 1)
 	lda #$4c
 @loop:	sta $2007
@@ -867,7 +877,7 @@ draw_board:
 	sta $2000
 	
 	; Left Border
-	vram #.HIBYTE(top_left + 32), #.LOBYTE(top_left + 32)
+	vram_addr (top_left + 32)
 	lda #$4e
 	ldx #(bottom-top-1)
 @loop2:	sta $2007
@@ -875,7 +885,7 @@ draw_board:
 	bne @loop2
 
 	; Right Border
-	vram #.HIBYTE(top_right + 32), #.LOBYTE(top_right + 32)
+	vram_addr (top_right + 32)
 	lda #$50
 	ldx #(bottom-top-1)
 @loop3:	sta $2007
@@ -895,11 +905,14 @@ draw_board:
 
 	; Setup the blocks
 	;block_row #$20, #$82
-	block_row #$20, #$a2
+	;block_row #$20, #$a2
 	block_row #$20, #$c2
 	block_row #$20, #$e2
 	block_row #$21, #$02
 	block_row #$21, #$22
+	block_row #$21, #$42
+	block_row #$21, #$62
+
 
 	rts
 
@@ -909,16 +922,11 @@ draw_board:
 ;
 draw_lives:
 .scope
-	lives_addr = $2000 + 2 + (2 * $20)
-	vram #.HIBYTE(lives_addr), #.LOBYTE(lives_addr)
-	addr lives_text
-	jsr prints
-
-	clc
+	vram_addr ($2000 + 3 + (1 * $20))
 	lda lives
+	clc
 	adc #NUMBER_OFFSET
 	sta $2007
-
 .endscope
 	rts
 
@@ -927,6 +935,13 @@ draw_lives:
 ; Draws score text
 ;
 draw_score:
+.scope
+	vram_addr ($2000 + 16 + (1 * $20))
+	addr score_text
+	jsr prints
+	addr score
+	jsr print_bcd
+.endscope
 	; TODO Implement me
 	rts
 
@@ -976,7 +991,19 @@ prints:
 ;	$01 - High byte of the memory address of the bcd
 ;
 print_bcd:
-	ldy #7
+	ldy #8
+
+	; Skip leading zeros
+@loop1:	dey
+	lda ($00), y
+	bne @break
+	lda #$ff
+	sta $2007
+	cpy #0
+	bne @loop1
+@break: 
+
+	; Print the remaining digits
 	clc
 @loop:	lda ($00), y
 	adc #NUMBER_OFFSET
@@ -1122,11 +1149,21 @@ get_tile:
 ; Determines if the given vram address represents a block
 ; and causes a game "collision" to occur if it is.
 ;
+; If a collision did occur this also increments and redraws
+; the score.
+;
 ; Params:
 ;	$00 - Low byte of the vram address
 ;	$01 - High byte of the vram addres
 ;
 block_hit:
+.scope
+	; For keeping tabs on whether or not we need to add
+	; points to score on a successful hit or clear
+	points_scored = $20
+	lda #0
+	sta points_scored
+
 	; Check the tile to see if it's a block
 	vram $01, $00
 	lda $2007
@@ -1135,13 +1172,17 @@ block_hit:
 	; t >= $42
 	clc
 	cmp #$42
-	bcc @return
+	bcs @check_high
+	rts
 
+@check_high:
 	; t < $4A
 	clc
 	cmp #$4A
-	bcs @return
+	bcc @check_side
+	rts
 
+@check_side:
 	; Check to see if the tile is the left or right side
 	; of the block
 	tax
@@ -1152,7 +1193,7 @@ block_hit:
 	txa
 	clc
 	adc #$02
-	cmp #$4a
+	cmp #$44
 	beq @clear_left
 
 	vram $01, $00
@@ -1167,13 +1208,18 @@ block_hit:
 	vram $01, $00
 	sta $2007
 	sta $2007
-	jmp @return
+
+	; Assign the "break points"
+	lda #(8 * 4)
+	sta points_scored
+
+	jmp @add_points
 
 @right:
 	txa
 	clc
 	adc #$01
-	cmp #$4a
+	cmp #$44
 	beq @clear_right
 
 	dec $00
@@ -1192,8 +1238,15 @@ block_hit:
 	sta $2007
 	sta $2007
 
+@add_points:
+	addr2 score, hit4
+	jsr bcd_add
+	jsr draw_score
+
 @return:
 	rts
+.endscope
+	
 
 
 
@@ -1223,6 +1276,9 @@ sprites:
 	.byte PADDLE_Y, $41, %01000000, $80
 	.byte PADDLE_Y, $40, %01000000, $88
 
+	; Lives Row Ball
+	.byte $07, $4a, %00000001, $0e
+
 
 paddle_cycle:
 	.byte $08, $18, $28, $38
@@ -1250,21 +1306,21 @@ game_over_attr:
 	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
 
 board_attr:
-	.byte $ff, $ff, $ff, $ff, $ff, $ff, $ff, $ff
-	.byte $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $0f, $0f, $0f, $0f, $0f, $0f, $0f, $0f
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
 	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+	.byte $84, $a5, $a5, $a5, $a5, $a5, $a5, $21
+
 
 
 ;;;;;;;;;;;;;; Strings ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 press_start:	.asciiz "PRESS START"
 score_text:	.asciiz "SCORE:"
-lives_text:	.asciiz "LIVES:"
 game_over_text:	.asciiz "GAME OVER"
 
 
